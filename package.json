@@ -14,5 +14,10 @@
   "type": "module",
   "workspaces": [
     "src/jurnal-web-frontend"
-  ]
+  ],
+  "dependencies": {
+    "@tailwindcss/vite": "^4.1.11",
+    "axios": "^1.10.0",
+    "tailwindcss": "^4.1.11"
+  }
 }
