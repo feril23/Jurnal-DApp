@@ -37,13 +37,28 @@ actor JurnalFinal {
         status: ArticleStatus;
         reviewers: [Principal];
         keywords: [Text];
+        reviews: [Review];
     };
 
     public type Profile = {
         name: Text;
         expertise: Text; // Bidang keahlian, misal: "Computer Science", "Biology"
         reviewingCount: Nat;
+        reputation: Nat;
         principal: Principal;
+    };
+
+    public type ReviewDecision = {
+        #accept;
+        #reject;
+        #revise; 
+    };
+
+    public type Review = {
+        reviewer: Principal;
+        decision: ReviewDecision;
+        comments: Text;
+        timestamp: Time.Time;
     };
 
     // =====================================================================
@@ -132,11 +147,12 @@ actor JurnalFinal {
             name = name;
             expertise = expertise;
             reviewingCount = reviewingCount;
+            reputation = 0;
             principal = caller;
         };
         
         // Simpan ke RBTree
-        profiles.put(caller, newProfile);
+        let result = profiles.put(caller, newProfile);
         
         Debug.print("✓ Profil berhasil disimpan!");
         Debug.print("Total profiles sekarang: " # Nat.toText(Iter.size(profiles.entries())));
@@ -152,55 +168,51 @@ actor JurnalFinal {
     };
 
     private func recheckUnassignedArticles(newReviewerProfile: Profile) : async () {
-        Debug.print("Memicu pengecekan ulang untuk reviewer baru: " # newReviewerProfile.name);
+        Debug.print("=== RECHECK PENDING ASSIGNMENTS ===");
+        Debug.print("New reviewer: " # newReviewerProfile.name # " | Expertise: " # newReviewerProfile.expertise);
         
-        // Buat daftar baru untuk menampung ID yang masih belum ter-assign
-        let remainingUnassigned = Buffer.Buffer<ArticleId>(0);
-
-        // BENAR: Iterasi menggunakan .vals() pada array unassignedArticleIds
-        for (articleId in unassignedArticleIds.vals()) {
-            switch (articles.get(articleId)) {
-                case null {
-                    // Artikel mungkin telah dihapus, abaikan saja dari daftar tunggu
-                    Debug.print("Peringatan: Artikel dengan ID #" # Nat.toText(articleId) # " di daftar tunggu tidak ditemukan di database.");
-                };
-                case (?article) {
-                    // Cek kecocokan antara artikel dan reviewer baru
-                    var isMatch = false;
-                    for (keyword in article.keywords.vals()) {
-                        if (containsKeyword(newReviewerProfile.expertise, keyword)) {
-                            isMatch := true;
-                        };
+        // Cari artikel yang masih membutuhkan reviewer tambahan
+        let allArticles = Iter.toArray(articles.entries());
+        var recheckCount = 0;
+        
+        for ((articleId, article) in allArticles.vals()) {
+            // Hanya cek artikel yang statusnya submitted atau in_review tapi belum cukup reviewer
+            let needsMoreReviewers = (article.status == #submitted and article.reviewers.size() < 2) or
+                                    (article.status == #in_review and article.reviewers.size() < 3);
+            
+            if (needsMoreReviewers) {
+                // Cek apakah reviewer baru cocok dengan artikel ini
+                var hasMatch = false;
+                for (keyword in article.keywords.vals()) {
+                    if (containsKeyword(newReviewerProfile.expertise, keyword)) {
+                        hasMatch := true;
                     };
-
-                    if (isMatch) {
-                        // Jika cocok, panggil fungsi autoAssignReviewers
-                        Debug.print("Kecocokan ditemukan! Mencoba menugaskan " # newReviewerProfile.name # " ke artikel #" # Nat.toText(article.id));
-                        
-                        // Panggil fungsi autoAssignReviewers yang sudah ada
-                        let assignmentResult = await autoAssignReviewers(article.id);
-                        
-                        switch(assignmentResult) {
-                            case (#ok(_)) {
-                            Debug.print("✓ Penugasan otomatis berhasil untuk artikel #" # Nat.toText(article.id));
-                            // Karena sudah berhasil ditugaskan, JANGAN masukkan lagi ke daftar tunggu
-                            };
-                            case (#err(msg)) {
-                            Debug.print("Penugasan otomatis belum selesai untuk artikel #" # Nat.toText(article.id) # ": " # msg);
-                            // Mungkin reviewer yang cocok sudah penuh, tetap masukkan ke daftar tunggu
-                            remainingUnassigned.add(articleId);
-                            }
-                        }
-                    } else {
-                        // Jika tidak cocok, masukkan kembali ke daftar tunggu untuk lain waktu
-                        remainingUnassigned.add(articleId);
+                };
+                
+                // Pastikan bukan author dan belum ditugaskan
+                let isNotAuthor = article.author != newReviewerProfile.principal;
+                let notAlreadyAssigned = Array.find<Principal>(article.reviewers, func(p) { p == newReviewerProfile.principal }) == null;
+                
+                if (hasMatch and isNotAuthor and notAlreadyAssigned) {
+                    Debug.print("🔄 Re-checking assignment for article #" # Nat.toText(articleId) # ": " # article.title);
+                    
+                    // Panggil autoAssignReviewers untuk artikel ini
+                    let assignmentResult = await autoAssignReviewers(articleId);
+                    recheckCount += 1;
+                    
+                    switch(assignmentResult) {
+                        case (#ok(updatedArticle)) {
+                            Debug.print("✅ Successfully updated article #" # Nat.toText(articleId) # " with new reviewer assignments");
+                        };
+                        case (#err(msg)) {
+                            Debug.print("⚠️ Could not update article #" # Nat.toText(articleId) # ": " # msg);
+                        };
                     };
                 };
             };
         };
-
-        // Update daftar tunggu dengan ID yang tersisa
-        unassignedArticleIds := Buffer.toArray(remainingUnassigned);
+        
+        Debug.print("Rechecked " # Nat.toText(recheckCount) # " articles for new reviewer assignment.");
     };
 
     // PERBAIKAN UTAMA: Fungsi getProfile yang benar
@@ -261,6 +273,7 @@ actor JurnalFinal {
                     keywords = article.keywords;
                     reviewers = Buffer.toArray(reviewerBuffer); // Update daftar reviewer
                     status = #in_review; // Otomatis ubah status menjadi 'in_review'
+                    reviews = article.reviews;
                 };
 
                 // Simpan artikel yang sudah diupdate
@@ -291,6 +304,7 @@ actor JurnalFinal {
                     submissionTime = article.submissionTime;
                     keywords = article.keywords;
                     reviewers = filteredReviewers;
+                    reviews = article.reviews;
                     status = if (filteredReviewers.size() == 0) #submitted else #in_review;
                 };
 
@@ -373,6 +387,7 @@ actor JurnalFinal {
             submissionTime = Time.now();
             status = #submitted;
             reviewers = [];
+            reviews = [];
             keywords = keywords;
         };
 
@@ -427,11 +442,123 @@ actor JurnalFinal {
                     submissionTime = article.submissionTime;
                     keywords = article.keywords;
                     reviewers = article.reviewers;
+                    reviews = article.reviews;
                     status = newStatus;
                 };
                 articles.put(id, updatedArticle);
                 return #ok(updatedArticle);
             };
+        };
+    };
+
+    public shared (caller) func submitReview(
+        articleId: ArticleId,
+        decision: ReviewDecision,
+        comments: Text
+    ) : async Result.Result<Article, Text> {
+        
+        let article = switch (articles.get(articleId)) {
+            case null { return #err("Artikel tidak ditemukan."); };
+            case (?a) { a };
+        };
+
+        let isAssignedReviewer = Array.find<Principal>(article.reviewers, func(p) { p == caller.caller }) != null;
+        if (not isAssignedReviewer) {
+            return #err("Anda tidak ditugaskan untuk mereview artikel ini.");
+        };
+
+        if (article.status != #in_review) {
+            return #err("Artikel ini tidak sedang dalam status 'in_review'.");
+        };
+
+        // Cek duplikat review dari reviewer yang sama
+        let existingReview = Array.find<Review>(article.reviews, func(r) { r.reviewer == caller.caller });
+        if (existingReview != null) {
+            return #err("Anda sudah pernah men-submit review untuk artikel ini.");
+        };
+        
+        let newReview: Review = {
+            reviewer = caller.caller;
+            decision = decision;
+            comments = comments;
+            timestamp = Time.now();
+        };
+
+        // Tambahkan review baru ke array yang sudah ada
+        let updatedReviews = Array.append(article.reviews, [newReview]);
+        
+        switch(profiles.get(caller.caller)) {
+            case null {}; // Seharusnya tidak terjadi, karena sudah divalidasi saat assign
+            case (?profile) {
+                let updatedProfile = { 
+                    name = profile.name;
+                    expertise = profile.expertise;
+                    principal = profile.principal;
+                    reviewingCount = if (profile.reviewingCount > 0) profile.reviewingCount - 1 else 0;
+                    reputation = profile.reputation + 10;
+                };
+                profiles.put(caller.caller, updatedProfile);
+            };
+        };
+
+        let updatedArticle : Article = {
+            id = article.id;
+            title = article.title;
+            author = article.author;
+            contentHash = article.contentHash;
+            submissionTime = article.submissionTime;
+            status = article.status;
+            reviewers = article.reviewers;
+            keywords = article.keywords;
+            reviews = updatedReviews;
+        };
+
+        let finalArticle = checkAndFinalizeStatus(updatedArticle);
+
+        articles.put(articleId, finalArticle);
+        return #ok(finalArticle);
+    };
+
+    private func checkAndFinalizeStatus(article: Article) : Article {
+        let minReviews : Nat = 3;
+
+        // 1. Cek apakah jumlah review sudah mencukupi
+        if (article.reviews.size() < minReviews) {
+            return article; // Jika belum, kembalikan artikel tanpa perubahan
+        };
+
+        // 2. Hitung jumlah setiap keputusan
+        var acceptCount : Nat = 0;
+        var rejectCount : Nat = 0;
+        for (review in article.reviews.vals()) {
+            switch (review.decision) {
+                case (#accept) { acceptCount += 1; };
+                case (#reject) { rejectCount += 1; };
+                case (#revise) { /* Abaikan untuk saat ini */ };
+            };
+        };
+
+        // 3. Terapkan aturan keputusan
+        var finalStatus = article.status;
+        if (rejectCount >= 2) {
+            finalStatus := #rejected; // Jika ada min 2 penolakan, reject
+            Debug.print("Keputusan final: Artikel #" # Nat.toText(article.id) # " ditolak.");
+        } else if (acceptCount >= 2) {
+            finalStatus := #accepted; // Jika ada min 2 menerima, accept
+            Debug.print("Keputusan final: Artikel #" # Nat.toText(article.id) # " diterima.");
+        };
+        
+        // 4. Kembalikan artikel dengan status yang mungkin sudah final
+        return {
+            id = article.id;
+            title = article.title;
+            author = article.author;
+            contentHash = article.contentHash;
+            submissionTime = article.submissionTime;
+            reviewers = article.reviewers;
+            keywords = article.keywords;
+            reviews = article.reviews;
+            status = finalStatus;
         };
     };
 
@@ -444,59 +571,93 @@ actor JurnalFinal {
             case (?a) { a };
         };
 
-        // Cek apakah artikel sudah memiliki reviewer maksimal (misal 3 reviewer)
+        // Konfigurasi reviewer assignment
         let maxReviewers = 3;
+        let minReviewers = 1; // Minimum reviewer yang harus ada
+        let targetReviewers = 3; // Target ideal reviewer
+        
+        // Cek apakah artikel sudah memiliki reviewer maksimal
         if (article.reviewers.size() >= maxReviewers) {
-            return #err("Artikel sudah memiliki reviewer maksimal.");
+            return #err("Artikel sudah memiliki reviewer maksimal (" # Nat.toText(maxReviewers) # " reviewer).");
         };
 
-        // Aturan: Jangan tugaskan penulisnya sendiri
         let author = article.author;
+        let currentReviewerCount = article.reviewers.size();
+        let reviewersNeeded = targetReviewers - currentReviewerCount;
 
-        // 2. Ambil semua calon reviewer - PERBAIKAN: gunakan entries() bukan values()
+        Debug.print("=== AUTO ASSIGN REVIEWERS ===");
+        Debug.print("Artikel ID: " # Nat.toText(articleId));
+        Debug.print("Current reviewers: " # Nat.toText(currentReviewerCount));
+        Debug.print("Reviewers needed: " # Nat.toText(reviewersNeeded));
+
+        // 2. Ambil semua calon reviewer dan buat scoring yang lebih canggih
         let allProfileEntries = Iter.toArray(profiles.entries());
         let allProfiles = Array.map<(Principal, Profile), Profile>(
             allProfileEntries, 
             func((_, profile)) { profile }
         );
 
-        // 3. Filter dan Hitung Skor (Scoring)
+        // 3. Sistem Scoring yang Diperbaiki
         let scoredReviewersBuffer = Buffer.Buffer<(Profile, Nat)>(0);
         
         for (profile in allProfiles.vals()) {
-            // Terapkan aturan: bukan si penulis & belum pernah ditugaskan
+            // Terapkan aturan dasar: bukan penulis & belum ditugaskan
             let isAuthor = profile.principal == author;
             let isAlreadyAssigned = Array.find<Principal>(article.reviewers, func(p){ p == profile.principal}) != null;
             
             if (not isAuthor and not isAlreadyAssigned) {
-
-                // Algoritma Scoring yang Diperbaiki
                 var score : Nat = 0;
+                var hasExpertiseMatch = false;
                 
-                // 1. Skor berdasarkan kecocokan expertise dengan keywords
+                // 1. SCORING BERDASARKAN KECOCOKAN EXPERTISE
                 for (keyword in article.keywords.vals()) {
                     if (containsKeyword(profile.expertise, keyword)) {
-                        score += 10; // Beri skor hanya jika ada kecocokan
+                        score += 15; // Skor base untuk kecocokan
+                        hasExpertiseMatch := true;
+                        
+                        // Bonus untuk exact match
+                        if (Text.equal(profile.expertise, keyword)) {
+                            score += 10;
+                        };
                     };
                 };
                 
-                // 2. HANYA JIKA ADA KECOCOKAN (score > 0), pertimbangkan sebagai kandidat
-                if (score > 0) {
-                    // Berikan bonus skor berdasarkan beban kerja
-                    let workloadScore = if (profile.reviewingCount < 10) {
-                        10 - profile.reviewingCount
-                    } else { 0 };
+                // 2. HANYA KANDIDAT DENGAN EXPERTISE MATCH YANG DIPERTIMBANGKAN
+                if (hasExpertiseMatch) {
+                    // 3. SCORING BERDASARKAN BEBAN KERJA (Workload balancing)
+                    let workloadScore = if (profile.reviewingCount == 0) {
+                        20 // Bonus besar untuk reviewer yang belum pernah review
+                    } else if (profile.reviewingCount < 3) {
+                        15 // Bonus sedang untuk reviewer dengan beban rendah
+                    } else if (profile.reviewingCount < 7) {
+                        10 // Bonus kecil untuk reviewer dengan beban sedang
+                    } else if (profile.reviewingCount < 15) {
+                        5  // Skor minimal untuk reviewer dengan beban tinggi
+                    } else {
+                        0  // Tidak ada bonus untuk reviewer yang overload
+                    };
+                    
                     score += workloadScore;
-
-                    // Tambahkan reviewer yang valid ke daftar kandidat
+                    
+                    // 4. BONUS UNTUK DIVERSITY (mencegah reviewer yang sama terus-menerus)
+                    // Implementasi sederhana: beri bonus jika reviewer belum banyak mereview artikel dari author yang sama
+                    // (Bisa ditambahkan logika lebih kompleks di masa depan)
+                    
+                    Debug.print("Kandidat reviewer: " # profile.name # " | Score: " # Nat.toText(score) # " | Workload: " # Nat.toText(profile.reviewingCount));
                     scoredReviewersBuffer.add((profile, score));
                 };
             };
         };
 
         let scoredReviewers = Buffer.toArray(scoredReviewersBuffer);
+        
+        if (scoredReviewers.size() == 0) {
+            // Tidak ada reviewer yang cocok ditemukan
+            Debug.print("Tidak ada reviewer dengan expertise yang cocok. Artikel akan masuk ke waiting list.");
+            return #err("Tidak ada reviewer dengan expertise yang cocok. Artikel akan ditugaskan otomatis ketika ada reviewer baru yang sesuai.");
+        };
 
-        // 4. Urutkan reviewer dari skor tertinggi ke terendah
+        // 4. SORTING - Urutkan berdasarkan skor tertinggi
         let sortedReviewers = Array.sort<(Profile, Nat)>(
             scoredReviewers, 
             func(a, b) { 
@@ -506,35 +667,60 @@ actor JurnalFinal {
             }
         );
         
-        // 5. Pilih reviewer yang dibutuhkan (maksimal 2 baru)
-        let currentReviewerCount = article.reviewers.size();
-        let reviewersToAdd = Nat.min(2, maxReviewers - currentReviewerCount);
-        let availableReviewers = Nat.min(reviewersToAdd, sortedReviewers.size());
-        
-        if (availableReviewers == 0) {
-            return #err("Tidak ada reviewer yang cocok ditemukan.");
+        // 5. SMART ASSIGNMENT STRATEGY
+        let availableReviewers = sortedReviewers.size();
+        let reviewersToAssign = if (availableReviewers >= reviewersNeeded) {
+            // Jika ada cukup reviewer, assign sesuai target
+            reviewersNeeded
+        } else if (availableReviewers >= minReviewers and currentReviewerCount == 0) {
+            // Jika tidak cukup untuk target tapi cukup untuk minimum, assign semua yang ada
+            availableReviewers
+        } else if (currentReviewerCount + availableReviewers >= minReviewers) {
+            // Jika dengan reviewer saat ini bisa mencapai minimum, assign semua yang ada
+            availableReviewers  
+        } else {
+            // Tidak cukup reviewer, tapi tetap assign yang ada
+            availableReviewers
         };
 
-        // 6. Tambahkan reviewer baru
+        if (reviewersToAssign == 0) {
+            return #err("Tidak ada reviewer yang bisa ditugaskan saat ini.");
+        };
+
+        Debug.print("Akan menugaskan " # Nat.toText(reviewersToAssign) # " reviewer dari " # Nat.toText(availableReviewers) # " kandidat.");
+
+        // 6. ASSIGN REVIEWERS
         let selectedReviewersBuffer = Buffer.fromArray<Principal>(article.reviewers);
+        var assignedCount = 0;
         
-        for (i in Iter.range(0, availableReviewers - 1)) {
-            let (profile, score) = sortedReviewers[i];
-            selectedReviewersBuffer.add(profile.principal);
-            
-            // Update beban kerja reviewer
-            let updatedProfile: Profile = {
-                name = profile.name;
-                expertise = profile.expertise;
-                principal = profile.principal;
-                reviewingCount = profile.reviewingCount + 1;
+        for (i in Iter.range(0, reviewersToAssign - 1)) {
+            if (i < sortedReviewers.size()) {
+                let (profile, score) = sortedReviewers[i];
+                selectedReviewersBuffer.add(profile.principal);
+                
+                // Update beban kerja reviewer
+                let updatedProfile: Profile = {
+                    name = profile.name;
+                    expertise = profile.expertise;
+                    principal = profile.principal;
+                    reputation = profile.reputation;
+                    reviewingCount = profile.reviewingCount + 1;
+                };
+                profiles.put(profile.principal, updatedProfile);
+                
+                assignedCount += 1;
+                Debug.print("✓ Reviewer ditugaskan: " # profile.name # " | Score: " # Nat.toText(score) # " | Expertise: " # profile.expertise);
             };
-            profiles.put(profile.principal, updatedProfile);
-            
-            Debug.print("Reviewer ditugaskan: " # profile.name # " (Score: " # Nat.toText(score) # ")");
         };
 
-        // 7. Update artikel dengan reviewer baru dan status
+        // 7. UPDATE ARTIKEL
+        let finalReviewerCount = selectedReviewersBuffer.size();
+        let newStatus = if (finalReviewerCount >= minReviewers) {
+            #in_review
+        } else {
+            #submitted // Tetap submitted jika belum cukup reviewer
+        };
+
         let updatedArticle : Article = {
             id = article.id;
             title = article.title;
@@ -543,10 +729,22 @@ actor JurnalFinal {
             submissionTime = article.submissionTime;
             keywords = article.keywords;
             reviewers = Buffer.toArray(selectedReviewersBuffer);
-            status = #in_review;
+            reviews = article.reviews;
+            status = newStatus;
         };
 
         articles.put(articleId, updatedArticle);
+
+        // 8. LOGGING HASIL
+        Debug.print("=== ASSIGNMENT COMPLETED ===");
+        Debug.print("Total reviewers assigned: " # Nat.toText(assignedCount));
+        Debug.print("Final reviewer count: " # Nat.toText(finalReviewerCount));
+        Debug.print("Article status: " # (if (newStatus == #in_review) "IN_REVIEW" else "SUBMITTED"));
+        
+        if (finalReviewerCount < targetReviewers) {
+            Debug.print("⚠️ Artikel belum mencapai target " # Nat.toText(targetReviewers) # " reviewer. Akan ditugaskan otomatis ketika ada reviewer baru yang sesuai.");
+        };
+
         return #ok(updatedArticle);
     };
 
@@ -577,35 +775,7 @@ actor JurnalFinal {
         Text.startsWith(expertiseLower, #text keywordLower) or
         Text.endsWith(expertiseLower, #text keywordLower)
     };
-
-    public shared (msg) func completeReview(articleId: ArticleId, reviewerId: Principal) : async Result.Result<Bool, Text> {
-        // Cek apakah reviewer memang ditugaskan untuk artikel ini
-        switch (articles.get(articleId)) {
-            case null { return #err("Artikel tidak ditemukan."); };
-            case (?article) {
-                let isAssigned = Array.find<Principal>(article.reviewers, func(p) { p == reviewerId }) != null;
-                if (not isAssigned) {
-                    return #err("Reviewer tidak ditugaskan untuk artikel ini.");
-                };
-                
-                // Update beban kerja reviewer (kurangi 1)
-                switch (profiles.get(reviewerId)) {
-                    case null { return #err("Profile reviewer tidak ditemukan."); };
-                    case (?profile) {
-                        let updatedProfile: Profile = {
-                            name = profile.name;
-                            expertise = profile.expertise;
-                            principal = profile.principal;
-                            reviewingCount = if (profile.reviewingCount > 0) profile.reviewingCount - 1 else 0;
-                        };
-                        profiles.put(reviewerId, updatedProfile);
-                        return #ok(true);
-                    };
-                };
-            };
-        };
-    };
-
+    
     public query func getAllArticles() : async [Article] {
         let entries = articles.entries();
         return Array.map<(ArticleId, Article), Article>(

@@ -67,16 +67,30 @@ function Profile() {
   console.log(profile);
 
   if (profile) {
-    // Jika profil sudah ada, tampilkan
     return (
       <div className="bg-white p-4 rounded-lg shadow-md">
-        <h3 className="font-bold text-lg">Profil Anda</h3>
-        <p>
-          <strong>Nama:</strong> {profile.name}
-        </p>
-        <p>
-          <strong>Keahlian:</strong> {profile.expertise}
-        </p>
+        <div className="flex justify-between items-center">
+          <h3 className="font-bold text-lg">Profil Anda</h3>
+          {/* --- TAMPILAN REPUTASI BARU --- */}
+          <div className="text-right">
+            <span className="font-bold text-indigo-600 text-xl">
+              {Number(profile.reputation)}
+            </span>
+            <p className="text-xs text-gray-500">Poin Reputasi</p>
+          </div>
+        </div>
+        <div className="mt-2 border-t pt-2">
+          <p>
+            <strong>Nama:</strong> {profile.name}
+          </p>
+          <p>
+            <strong>Keahlian:</strong> {profile.expertise}
+          </p>
+          <p>
+            <strong>Tugas Review Aktif:</strong>{" "}
+            {Number(profile.reviewingCount)}
+          </p>
+        </div>
       </div>
     );
   }

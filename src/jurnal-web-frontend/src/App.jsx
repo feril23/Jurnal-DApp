@@ -8,15 +8,18 @@ import ArticleDetailModal from "./components/ArticleDetailModal";
 import Auth from "./components/Auth";
 import Profile from "./components/Profile";
 import { uploadToIPFS } from "./utils/ipfs";
+import ReviewDashboard from "./components/ReviewDashboard";
+import AuthorDashboard from "./components/AuthorDashboard";
 
 function App() {
   // Ambil status login dan actor terotentikasi dari Context
-  const { isAuthenticated, actor } = useAuth();
+  const { isAuthenticated, actor, principal } = useAuth();
   const [reviewers, setReviewers] = useState([]);
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [selectedArticle, setSelectedArticle] = useState(null);
+  const [activeTab, setActiveTab] = useState("all_articles");
 
   const fetchArticles = async () => {
     if (!actor) return; // Jangan fetch jika actor belum siap
@@ -31,7 +34,7 @@ function App() {
   const fetchReviewers = async () => {
     if (!actor) return;
     try {
-      const reviewerList = await actor.getReviewers();
+      const reviewerList = await actor.getAllProfiles();
       setReviewers(reviewerList);
     } catch (error) {
       console.error("Gagal mengambil daftar reviewer:", error);
@@ -42,6 +45,34 @@ function App() {
     fetchArticles();
     fetchReviewers();
   }, [actor]); // Fetch ulang jika actor berubah (misal: setelah login)
+
+  const handleSubmitReview = async (articleId, decision, comments) => {
+    if (!actor) return;
+    setMessage("Mengirim review Anda...");
+    try {
+      // Ubah string decision dari form menjadi object variant Motoko
+      const decisionVariant = { [decision]: null };
+
+      const result = await actor.submitReview(
+        articleId,
+        decisionVariant,
+        comments
+      );
+
+      if ("ok" in result) {
+        setMessage("Review berhasil dikirim!");
+        // Refresh daftar artikel untuk memuat data review yang baru
+        fetchArticles();
+        // Tutup modal dan buka lagi untuk refresh detailnya (opsional)
+        setSelectedArticle(result.ok);
+      } else {
+        setMessage(`Error: ${result.err}`);
+      }
+    } catch (error) {
+      console.error("Gagal mengirim review:", error);
+      setMessage("Terjadi error saat mengirim review.");
+    }
+  };
 
   const handleAssignReviewer = async (articleId, reviewerPrincipal) => {
     if (!actor) return;
@@ -132,13 +163,67 @@ function App() {
 
         {message && <p className="text-center ...">{message}</p>}
 
+        {/* --- NAVIGASI TAB BARU --- */}
+        <div className="w-full max-w-4xl mx-auto my-8 border-b border-gray-300 flex">
+          <button
+            onClick={() => setActiveTab("all_articles")}
+            className={`py-2 px-6 font-semibold ${
+              activeTab === "all_articles"
+                ? "border-b-2 border-indigo-600 text-indigo-600"
+                : "text-gray-500"
+            }`}
+          >
+            Semua Artikel
+          </button>
+          {isAuthenticated && (
+            <>
+              <button
+                onClick={() => setActiveTab("my_articles")}
+                className={`py-2 px-6 font-semibold ${
+                  activeTab === "my_articles"
+                    ? "border-b-2 border-indigo-600 text-indigo-600"
+                    : "text-gray-500"
+                }`}
+              >
+                Artikel Saya
+              </button>
+              <button
+                onClick={() => setActiveTab("my_reviews")}
+                className={`py-2 px-6 font-semibold ${
+                  activeTab === "my_reviews"
+                    ? "border-b-2 border-indigo-600 text-indigo-600"
+                    : "text-gray-500"
+                }`}
+              >
+                Tugas Review Saya
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* --- TAMPILAN KONDISIONAL BERDASARKAN TAB --- */}
         <div className="mt-8">
-          <ArticleList
-            articles={articles}
-            onStatusUpdate={handleStatusUpdate}
-            onViewDetail={setSelectedArticle}
-            setArticles={setArticles}
-          />
+          {activeTab === "all_articles" && (
+            <ArticleList
+              articles={articles}
+              onStatusUpdate={handleStatusUpdate}
+              onViewDetail={setSelectedArticle}
+            />
+          )}
+
+          {activeTab === "my_articles" && isAuthenticated && (
+            <AuthorDashboard
+              onStatusUpdate={handleStatusUpdate}
+              onViewDetail={setSelectedArticle}
+            />
+          )}
+
+          {activeTab === "my_reviews" && isAuthenticated && (
+            <ReviewDashboard
+              onStatusUpdate={handleStatusUpdate}
+              onViewDetail={setSelectedArticle}
+            />
+          )}
         </div>
 
         <ArticleDetailModal
@@ -146,6 +231,8 @@ function App() {
           onClose={() => setSelectedArticle(null)}
           reviewers={reviewers}
           onAssignReviewer={handleAssignReviewer}
+          onReviewSubmit={handleSubmitReview}
+          currentUserPrincipal={principal}
         />
       </div>
     </div>
