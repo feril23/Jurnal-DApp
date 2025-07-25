@@ -13,6 +13,9 @@ export const AuthProvider = ({ children }) => {
   const [principal, setPrincipal] = useState(null);
   const [actor, setActor] = useState(null);
 
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+
   useEffect(() => {
     AuthClient.create({
       idleOptions: { idleTimeout: 1000 * 60 * 30 }, // 30 menit
@@ -20,8 +23,8 @@ export const AuthProvider = ({ children }) => {
       setAuthClient(client);
       const isAuthenticated = await client.isAuthenticated();
       if (isAuthenticated) {
-        const id = client.getIdentity();
-        updateAuth(true, id, client);
+        const identity = client.getIdentity();
+        updateAuth(true, identity);
       }
     });
   }, []);
@@ -44,21 +47,67 @@ export const AuthProvider = ({ children }) => {
     updateAuth(false, null, authClient);
   };
 
-  const updateAuth = (loggedIn, id, client) => {
+  const updateAuth = (loggedIn, identity) => {
     setIsAuthenticated(loggedIn);
-    setIdentity(id);
-    const p = id ? id.getPrincipal() : null;
+    const p = identity ? identity.getPrincipal() : null;
     setPrincipal(p);
 
-    // Membuat actor baru yang terotentikasi sesuai dokumentasi
     const canisterId = process.env.CANISTER_ID_JURNAL_WEB_BACKEND;
     const newActor = createActor(canisterId, {
-      agentOptions: { identity: id },
+      agentOptions: { identity },
     });
     setActor(newActor);
+
+    // Jika logout, bersihkan notifikasi
+    if (!loggedIn) {
+      setNotifications([]);
+      setUnreadCount(0);
+    }
   };
 
-  const auth = { isAuthenticated, login, logout, principal, actor };
+  const fetchNotifications = async (currentActor) => {
+    if (!currentActor) return;
+    try {
+      // Gunakan fungsi backend yang sudah kita buat
+      const notifs = await currentActor.getMyNotificationsAuthenticated();
+      setNotifications(notifs);
+      // Hitung notifikasi yang belum dibaca
+      const unread = notifs.filter((n) => !n.isRead).length;
+      setUnreadCount(unread);
+    } catch (error) {
+      console.error("Gagal mengambil notifikasi:", error);
+    }
+  };
+
+  const markNotificationsAsRead = async (ids) => {
+    if (!actor || ids.length === 0) return;
+    try {
+      await actor.markNotificationsAsRead(ids);
+      // Ambil ulang notifikasi untuk update UI
+      fetchNotifications(actor);
+    } catch (error) {
+      console.error("Gagal menandai notifikasi:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthenticated && actor) {
+      fetchNotifications(actor); // Ambil saat pertama kali login
+      const interval = setInterval(() => fetchNotifications(actor), 30000);
+      return () => clearInterval(interval); // Bersihkan interval saat logout
+    }
+  }, [isAuthenticated, actor]);
+
+  const auth = {
+    isAuthenticated,
+    login,
+    logout,
+    principal,
+    actor,
+    notifications,
+    unreadCount,
+    markNotificationsAsRead,
+  };
 
   return <AuthContext.Provider value={auth}>{children}</AuthContext.Provider>;
 };

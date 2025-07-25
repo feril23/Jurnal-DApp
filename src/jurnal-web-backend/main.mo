@@ -20,12 +20,23 @@ actor JurnalFinal {
 
     public type ArticleId = Nat;
     private var dataVersion : Nat = 0;
+    public type NotificationId = Nat;
 
     public type ArticleStatus = {
         #submitted;
         #in_review;
         #accepted;
         #rejected;
+        #published;
+        #pending_final_decision;
+    };
+
+    public type Notification = {
+        id: NotificationId;
+        recipient: Principal;
+        message: Text;
+        timestamp: Time.Time;
+        isRead: Bool;
     };
 
     public type Article = {
@@ -71,6 +82,8 @@ actor JurnalFinal {
     private stable var articlesEntries: [(ArticleId, Article)] = [];
     private stable var profilesEntries: [(Principal, Profile)] = [];
     private stable var unassignedArticleIdsEntries: [ArticleId] = [];
+    private stable var nextNotificationId: NotificationId = 1;
+    private stable var notificationsEntries: [(Principal, [Notification])] = [];
 
     // in-memory structures
     private var articles: RBTree.RBTree<ArticleId, Article> = 
@@ -79,6 +92,9 @@ actor JurnalFinal {
     private var profiles: RBTree.RBTree<Principal, Profile> = 
         RBTree.RBTree<Principal, Profile>(Principal.compare);
 
+    private var notifications: RBTree.RBTree<Principal, [Notification]> = 
+        RBTree.RBTree<Principal, [Notification]>(Principal.compare);
+
     private var unassignedArticleIds: [ArticleId] = [];
 
     // Pre-upgrade: simpan data
@@ -86,6 +102,7 @@ actor JurnalFinal {
         articlesEntries := Iter.toArray(articles.entries());
         profilesEntries := Iter.toArray(profiles.entries());
         unassignedArticleIdsEntries := unassignedArticleIds;
+        notificationsEntries := Iter.toArray(notifications.entries());
     };
 
     // Post-upgrade: restore data
@@ -93,6 +110,8 @@ actor JurnalFinal {
         articles := RBTree.RBTree<ArticleId, Article>(Nat.compare);
         profiles := RBTree.RBTree<Principal, Profile>(Principal.compare);
         unassignedArticleIds := unassignedArticleIdsEntries;
+        notifications := RBTree.RBTree<Principal, [Notification]>(Principal.compare);
+        notificationsEntries := [];
 
         for ((id, article) in articlesEntries.vals()) {
             articles.put(id, article);
@@ -163,8 +182,67 @@ actor JurnalFinal {
         return #ok(newProfile);
     };
 
+    private func createNotification(recipient: Principal, message: Text) {
+        let newNotif: Notification = {
+            id = nextNotificationId;
+            recipient = recipient;
+            message = message;
+            timestamp = Time.now();
+            isRead = false;
+        };
+        nextNotificationId += 1;
+
+        var userNotifs = switch (notifications.get(recipient)) {
+            case null { [] };
+            case (?notifs) { notifs };
+        };
+
+        // Tambahkan notifikasi baru di awal array
+        userNotifs := Array.append([newNotif], userNotifs);
+        notifications.put(recipient, userNotifs);
+
+        Debug.print("Notifikasi dibuat untuk " # Principal.toText(recipient) # ": " # message);
+    };
+
     public query func getDataVersion() : async Nat {
         return dataVersion;
+    };
+
+    public shared (msg) func publishArticle(articleId: ArticleId) : async Result.Result<Article, Text> {
+        let caller = msg.caller;
+
+        // 1. Ambil data artikel
+        let article = switch (articles.get(articleId)) {
+            case null { return #err("Artikel tidak ditemukan."); };
+            case (?a) { a };
+        };
+
+        // 2. Validasi Izin: Hanya penulis yang bisa mempublikasikan
+        if (article.author != caller) {
+            return #err("Hanya penulis yang dapat mempublikasikan artikel ini.");
+        };
+
+        // 3. Validasi Status: Hanya artikel yang 'accepted' yang bisa dipublikasikan
+        if (article.status != #accepted) {
+            return #err("Hanya artikel yang berstatus 'accepted' yang bisa dipublikasikan.");
+        };
+
+        // 4. Buat record artikel yang sudah diupdate
+        let updatedArticle : Article = {
+            id = article.id;
+            title = article.title;
+            author = article.author;
+            contentHash = article.contentHash;
+            submissionTime = article.submissionTime;
+            keywords = article.keywords;
+            reviewers = article.reviewers;
+            reviews = article.reviews;
+            status = #published; 
+        };
+
+        // 5. Simpan artikel yang sudah diupdate
+        articles.put(articleId, updatedArticle);
+        return #ok(updatedArticle);
     };
 
     private func recheckUnassignedArticles(newReviewerProfile: Profile) : async () {
@@ -516,6 +594,10 @@ actor JurnalFinal {
         let finalArticle = checkAndFinalizeStatus(updatedArticle);
 
         articles.put(articleId, finalArticle);
+
+        let notifMsg = "Review baru telah disubmit untuk artikel Anda: '" # finalArticle.title # "'";
+        createNotification(finalArticle.author, notifMsg);
+
         return #ok(finalArticle);
     };
 
@@ -525,6 +607,40 @@ actor JurnalFinal {
         // 1. Cek apakah jumlah review sudah mencukupi
         if (article.reviews.size() < minReviews) {
             return article; // Jika belum, kembalikan artikel tanpa perubahan
+        };
+
+        let updatedStatus = #pending_final_decision;
+        Debug.print("Jumlah review cukup. Status diubah menjadi #pending_final_decision untuk artikel #" # Nat.toText(article.id));
+
+        return {
+            id = article.id;
+            title = article.title;
+            author = article.author;
+            contentHash = article.contentHash;
+            submissionTime = article.submissionTime;
+            reviewers = article.reviewers;
+            keywords = article.keywords;
+            reviews = article.reviews;
+            status = updatedStatus;
+        };
+    };
+
+    public shared (msg) func finalizeDecision(articleId: ArticleId) : async Result.Result<Article, Text> {
+        let caller = msg.caller;
+
+        let article = switch (articles.get(articleId)) {
+            case null { return #err("Artikel tidak ditemukan."); };
+            case (?a) { a };
+        };
+
+        // Validasi: Hanya penulis yang bisa finalisasi
+        if (article.author != caller) {
+            return #err("Hanya penulis yang dapat melakukan finalisasi keputusan.");
+        };
+
+        // Validasi: Pastikan statusnya memang sedang menunggu keputusan
+        if (article.status != #pending_final_decision) {
+            return #err("Artikel ini tidak sedang dalam status menunggu keputusan final.");
         };
 
         // 2. Hitung jumlah setiap keputusan
@@ -549,7 +665,7 @@ actor JurnalFinal {
         };
         
         // 4. Kembalikan artikel dengan status yang mungkin sudah final
-        return {
+        let finalArticle : Article = {
             id = article.id;
             title = article.title;
             author = article.author;
@@ -559,6 +675,63 @@ actor JurnalFinal {
             keywords = article.keywords;
             reviews = article.reviews;
             status = finalStatus;
+        };
+
+        articles.put(articleId, finalArticle);
+
+        let notifMsg = "Keputusan final (" # statusToText(finalArticle.status) # ") telah dibuat untuk artikel: '" # finalArticle.title # "'";
+        createNotification(finalArticle.author, notifMsg);
+
+        return #ok(finalArticle);
+    };
+
+    private func statusToText(status: ArticleStatus) : Text {
+        switch (status) {
+            case (#accepted) { return "Diterima"; };
+            case (#rejected) { return "Ditolak"; };
+            case (#revise) { return "Perlu Revisi"; };
+            case (#pending_review) { return "Menunggu Review"; };
+        };
+    };
+
+    public query func getMyNotifications(user: Principal) : async [Notification] {
+        // Untuk otentikasi nyata, kita akan mengandalkan actor yang diautentikasi dari frontend
+        // Jadi kita perlu menerima caller sebagai argumen
+        return []; // Akan kita perbaiki di frontend
+    };
+
+    public query (msg) func getMyNotificationsAuthenticated() : async [Notification] {
+        switch (notifications.get(msg.caller)) {
+            case null { [] };
+            case (?notifs) { notifs };
+        }
+    };
+
+    public shared (msg) func markNotificationsAsRead(ids: [NotificationId]) : async () {
+        let caller = msg.caller;
+        switch (notifications.get(caller)) {
+            case null {}; // Tidak ada notifikasi
+            case (?notifs) {
+                let updatedNotifs = Array.map<Notification, Notification>(notifs, func(notif) {
+                    // Cek apakah ID notifikasi ini ada di dalam daftar yang ingin diubah
+                    if (Array.find<NotificationId>(ids, func(id){ id == notif.id }) != null) {
+                        return {
+                            id = notif.id;
+                            recipient = notif.recipient;
+                            message = notif.message;
+                            timestamp = notif.timestamp;
+                            isRead = true;
+                        };
+
+                    } else {
+                        // Jika tidak ada di daftar, kembalikan notifikasi tanpa perubahan
+                        return notif;
+                    };
+                });
+                
+                // Simpan kembali array notifikasi yang sudah diperbarui
+                notifications.put(caller, updatedNotifs);
+            };
         };
     };
 
@@ -707,6 +880,9 @@ actor JurnalFinal {
                     reviewingCount = profile.reviewingCount + 1;
                 };
                 profiles.put(profile.principal, updatedProfile);
+
+                let notifMsg = "Anda ditugaskan untuk mereview artikel: '" # article.title # "'";
+                createNotification(profile.principal, notifMsg);
                 
                 assignedCount += 1;
                 Debug.print("✓ Reviewer ditugaskan: " # profile.name # " | Score: " # Nat.toText(score) # " | Expertise: " # profile.expertise);
@@ -775,13 +951,28 @@ actor JurnalFinal {
         Text.startsWith(expertiseLower, #text keywordLower) or
         Text.endsWith(expertiseLower, #text keywordLower)
     };
-    
+
     public query func getAllArticles() : async [Article] {
         let entries = articles.entries();
         return Array.map<(ArticleId, Article), Article>(
             Iter.toArray(entries), 
             func((_, article)) { article }
         );
+    };
+
+    public query func getPublishedArticles() : async [Article] {
+        let entries = articles.entries();
+        let allArticles = Array.map<(ArticleId, Article), Article>(
+            Iter.toArray(entries), 
+            func((_, article)) { article }
+        );
+        // Filter hanya artikel dengan status #published
+        return Array.filter<Article>(allArticles, func(article) {
+            switch (article.status) {
+                case (#published) { true };
+                case (_) { false };
+            };
+        });
     };
 
     public query func getArticlesByAuthor(author: Principal) : async [Article] {

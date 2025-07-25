@@ -10,6 +10,7 @@ import Profile from "./components/Profile";
 import { uploadToIPFS } from "./utils/ipfs";
 import ReviewDashboard from "./components/ReviewDashboard";
 import AuthorDashboard from "./components/AuthorDashboard";
+import PublishedList from "./components/PublishedList";
 
 function App() {
   // Ambil status login dan actor terotentikasi dari Context
@@ -19,7 +20,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [selectedArticle, setSelectedArticle] = useState(null);
-  const [activeTab, setActiveTab] = useState("all_articles");
+  const [activeTab, setActiveTab] = useState("published");
 
   const fetchArticles = async () => {
     if (!actor) return; // Jangan fetch jika actor belum siap
@@ -74,6 +75,27 @@ function App() {
     }
   };
 
+  const handleFinalizeDecision = async (articleId) => {
+    if (!actor) return;
+    setMessage(`Memfinalisasi keputusan untuk artikel ID: ${articleId}...`);
+    try {
+      const result = await actor.finalizeDecision(articleId);
+
+      if ("ok" in result) {
+        setMessage("Keputusan berhasil difinalisasi!");
+        // Refresh daftar artikel untuk menampilkan status final (accepted/rejected)
+        fetchArticles();
+        // Update juga artikel yang sedang dilihat di modal
+        setSelectedArticle(result.ok);
+      } else {
+        setMessage(`Error: ${result.err}`);
+      }
+    } catch (error) {
+      console.error("Gagal memfinalisasi keputusan:", error);
+      setMessage("Terjadi error saat finalisasi.");
+    }
+  };
+
   const handleAssignReviewer = async (articleId, reviewerPrincipal) => {
     if (!actor) return;
     setMessage(`Menugaskan reviewer ke artikel ID: ${articleId}...`);
@@ -89,6 +111,23 @@ function App() {
     } catch (error) {
       console.error("Gagal menugaskan reviewer:", error);
       setMessage("Terjadi error saat menugaskan reviewer.");
+    }
+  };
+
+  const handlePublishArticle = async (articleId) => {
+    if (!actor) return;
+    setMessage(`Mempublikasikan artikel ID: ${articleId}...`);
+    try {
+      const result = await actor.publishArticle(articleId);
+      if ("ok" in result) {
+        setMessage("Artikel berhasil dipublikasikan!");
+        fetchArticles(); // Refresh daftar utama
+      } else {
+        setMessage(`Error: ${result.err}`);
+      }
+    } catch (error) {
+      console.error("Gagal mempublikasikan:", error);
+      setMessage("Terjadi error saat publikasi.");
     }
   };
 
@@ -175,6 +214,14 @@ function App() {
           >
             Semua Artikel
           </button>
+          <button
+            onClick={() => setActiveTab("published")}
+            className={`py-2 px-6 ... ${
+              activeTab === "published" ? "..." : "..."
+            }`}
+          >
+            Published
+          </button>
           {isAuthenticated && (
             <>
               <button
@@ -203,6 +250,9 @@ function App() {
 
         {/* --- TAMPILAN KONDISIONAL BERDASARKAN TAB --- */}
         <div className="mt-8">
+          {activeTab === "published" && (
+            <PublishedList onViewDetail={setSelectedArticle} />
+          )}
           {activeTab === "all_articles" && (
             <ArticleList
               articles={articles}
@@ -229,10 +279,12 @@ function App() {
         <ArticleDetailModal
           article={selectedArticle}
           onClose={() => setSelectedArticle(null)}
+          onPublish={handlePublishArticle}
           reviewers={reviewers}
           onAssignReviewer={handleAssignReviewer}
           onReviewSubmit={handleSubmitReview}
           currentUserPrincipal={principal}
+          onFinalize={handleFinalizeDecision}
         />
       </div>
     </div>

@@ -17,14 +17,21 @@ const Icon = ({ path, className = "w-5 h-5" }) => (
 function ArticleDetailModal({
   article,
   onClose,
+  onPublish,
   reviewers,
   onAssignReviewer,
   onReviewSubmit,
   currentUserPrincipal,
+  onFinalize,
 }) {
   const [selectedReviewer, setSelectedReviewer] = useState("");
   const [decision, setDecision] = useState("accept");
   const [comments, setComments] = useState("");
+  const isAuthor =
+    currentUserPrincipal && article?.author // <-- Cek apakah keduanya ada
+      ? article.author.toText() === currentUserPrincipal.toText()
+      : false;
+  const canPublish = isAuthor && Object.keys(article.status)[0] === "accepted";
 
   if (!article) return null;
 
@@ -47,12 +54,20 @@ function ArticleDetailModal({
     Object.keys(article.status)[0] === "in_review";
 
   const statusText = Object.keys(article.status)[0];
+
   const statusInfo = {
     submitted: { text: "Submitted", color: "bg-gray-500" },
     in_review: { text: "In Review", color: "bg-yellow-500" },
+    pending_final_decision: {
+      text: "Pending Final Decision",
+      color: "bg-blue-500",
+    },
     accepted: { text: "Accepted", color: "bg-green-500" },
     rejected: { text: "Rejected", color: "bg-red-500" },
+    published: { text: "Published", color: "bg-purple-600" },
   };
+
+  const canFinalize = isAuthor && statusText === "pending_final_decision";
 
   const currentStatus = statusInfo[statusText] || statusInfo.submitted;
 
@@ -272,6 +287,33 @@ function ArticleDetailModal({
               </div>
             </div>
           </section>
+
+          {canFinalize && (
+            <div>
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">
+                Aksi Penulis
+              </h3>
+              <p className="text-sm text-gray-600 mb-4">
+                Proses review telah selesai. Silakan lihat hasilnya di atas dan
+                lakukan finalisasi untuk mengunci status artikel ini.
+              </p>
+              <button
+                onClick={() => onFinalize(article.id)}
+                className="w-full justify-center py-2 px-4 border rounded-md shadow-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+              >
+                Finalisasi Keputusan
+              </button>
+            </div>
+          )}
+
+          {canPublish && (
+            <button
+              onClick={() => onPublish(article.id)}
+              className="mt-6 w-full bg-purple-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-purple-700 transition"
+            >
+              Publish Artikel Ini
+            </button>
+          )}
         </div>
       </div>
     </div>
