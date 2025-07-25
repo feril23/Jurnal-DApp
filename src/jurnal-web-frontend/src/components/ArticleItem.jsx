@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "react-router-dom";
 
 function ArticleItem({ article, onStatusUpdate, onViewDetail }) {
   const statusText = Object.keys(article.status)[0];
@@ -21,9 +22,9 @@ function ArticleItem({ article, onStatusUpdate, onViewDetail }) {
   };
 
   return (
-    <div
-      className="bg-white p-5 rounded-lg shadow-md transition-shadow hover:shadow-xl"
-      onClick={() => onViewDetail(article)}
+    <Link
+      to={`/article/${article.id}`}
+      className="block bg-white p-5 rounded-lg shadow-md transition-transform transform hover:scale-[1.02]"
     >
       <div className="flex justify-between items-start">
         {/* Informasi artikel */}
@@ -73,7 +74,7 @@ function ArticleItem({ article, onStatusUpdate, onViewDetail }) {
           )}
         </div>
       </div>
-    </div>
+    </Link>
   );
 }
 

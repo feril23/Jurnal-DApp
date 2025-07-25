@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { jurnal_web_backend } from "../../../declarations/jurnal-web-backend";
 import { useAuth } from "../context/AuthContext";
+import toast from "react-hot-toast";
 
 // Komponen ini menerima Principal pengguna yang login sebagai prop
 function Profile() {
@@ -40,15 +41,24 @@ function Profile() {
 
   const handleRegister = async (e) => {
     e.preventDefault();
-    setMessage("Mendaftarkan profil...");
-    // Gunakan actor dari context
-    const result = await actor.registerProfile(name, expertise, 0);
-    if ("ok" in result) {
-      setProfile(result.ok);
-      setMessage("Profil berhasil dibuat!");
-    } else {
-      setMessage(`Error: ${result.err}`);
-    }
+
+    await toast.promise(
+      // Pastikan Anda mengirim 0 untuk reviewingCount
+      actor.registerProfile(name, expertise, 0),
+      {
+        loading: "Mendaftarkan profil...",
+        success: (result) => {
+          if ("ok" in result) {
+            setProfile(result.ok);
+            setShowForm(false);
+            return "Profil berhasil dibuat!";
+          } else {
+            throw new Error(result.err);
+          }
+        },
+        error: (err) => `Error: ${err.message}`,
+      }
+    );
   };
 
   if (!principal) {

@@ -2,31 +2,20 @@ import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import ArticleItem from "./ArticleItem"; // Kita gunakan kembali komponen yang sudah ada
 
-function AuthorDashboard({ onStatusUpdate, onViewDetail }) {
+function AuthorDashboard({
+  onStatusUpdate,
+  onViewDetail,
+  loading,
+  myArticles,
+  fetchMyArticles,
+}) {
   const { actor, principal } = useAuth();
-  const [myArticles, setMyArticles] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const fetchMyArticles = async () => {
-      if (!actor || !principal) return;
-
-      setIsLoading(true);
-      try {
-        // Panggil fungsi backend yang sudah Anda buat!
-        const articles = await actor.getArticlesByAuthor(principal);
-        setMyArticles(articles);
-      } catch (error) {
-        console.error("Gagal mengambil artikel saya:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     fetchMyArticles();
   }, [actor, principal]);
 
-  if (isLoading) {
+  if (loading) {
     return <p className="text-center text-gray-500">Memuat artikel Anda...</p>;
   }
 

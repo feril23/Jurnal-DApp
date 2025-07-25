@@ -2,31 +2,20 @@ import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import ArticleItem from "./ArticleItem"; // Kita gunakan kembali komponen yang sudah ada
 
-function ReviewDashboard({ onStatusUpdate, onViewDetail }) {
+function ReviewDashboard({
+  onStatusUpdate,
+  onViewDetail,
+  loading,
+  fetchReviewTasks,
+  reviewTasks,
+}) {
   const { actor, principal } = useAuth();
-  const [reviewTasks, setReviewTasks] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const fetchReviewTasks = async () => {
-      if (!actor || !principal) return;
-
-      setIsLoading(true);
-      try {
-        // Panggil fungsi backend yang sudah Anda buat!
-        const tasks = await actor.getArticlesToReview(principal);
-        setReviewTasks(tasks);
-      } catch (error) {
-        console.error("Gagal mengambil tugas review:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     fetchReviewTasks();
   }, [actor, principal]); // Jalankan ulang jika user login/logout
 
-  if (isLoading) {
+  if (loading) {
     return (
       <p className="text-center text-gray-500">Memuat tugas review Anda...</p>
     );

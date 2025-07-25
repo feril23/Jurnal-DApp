@@ -1,37 +1,29 @@
-// File: src/App.jsx
-import { useState, useEffect } from "react";
-import { useAuth } from "./context/AuthContext"; // <-- Gunakan hook kita
+import React, { useState, useEffect } from "react";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { useAuth } from "./context/AuthContext";
 
-import ArticleForm from "./components/ArticleForm";
-import ArticleList from "./components/ArticleList";
+// Impor komponen Layout & Halaman
+import Header from "./components/Header";
+import Footer from "./components/Footer";
+import HomePage from "./pages/HomePage";
+import PublishedPage from "./pages/PublishedPage";
+import DashboardPage from "./pages/DashboardPage";
 import ArticleDetailModal from "./components/ArticleDetailModal";
-import Auth from "./components/Auth";
-import Profile from "./components/Profile";
-import { uploadToIPFS } from "./utils/ipfs";
-import ReviewDashboard from "./components/ReviewDashboard";
-import AuthorDashboard from "./components/AuthorDashboard";
-import PublishedList from "./components/PublishedList";
+import toast, { Toaster } from "react-hot-toast";
+import ArticleDetailPage from "./pages/ArticleDetailPage";
 
 function App() {
-  // Ambil status login dan actor terotentikasi dari Context
-  const { isAuthenticated, actor, principal } = useAuth();
-  const [reviewers, setReviewers] = useState([]);
-  const [articles, setArticles] = useState([]);
+  const { actor, principal } = useAuth();
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
+  const [myArticles, setMyArticles] = useState([]);
+  const [reviewTasks, setReviewTasks] = useState([]);
+
+  // State untuk Modal & data pendukungnya kita simpan di level tertinggi
   const [selectedArticle, setSelectedArticle] = useState(null);
-  const [activeTab, setActiveTab] = useState("published");
+  const [reviewers, setReviewers] = useState([]);
+  // const [message, setMessage] = useState("");
 
-  const fetchArticles = async () => {
-    if (!actor) return; // Jangan fetch jika actor belum siap
-    try {
-      const articlesList = await actor.getAllArticles();
-      setArticles(articlesList.sort((a, b) => Number(b.id) - Number(a.id)));
-    } catch (error) {
-      console.error("Gagal mengambil daftar artikel:", error);
-    }
-  };
-
+  // Fungsi untuk mengambil daftar reviewer
   const fetchReviewers = async () => {
     if (!actor) return;
     try {
@@ -43,251 +35,159 @@ function App() {
   };
 
   useEffect(() => {
-    fetchArticles();
-    fetchReviewers();
-  }, [actor]); // Fetch ulang jika actor berubah (misal: setelah login)
+    if (actor) fetchReviewers();
+  }, [actor]);
+
+  // Handler untuk aksi-aksi di dalam modal
+  const handleAssignReviewer = async (articleId, reviewerPrincipal) => {
+    if (!actor) return;
+    await toast.promise(actor.assignReviewer(articleId, reviewerPrincipal), {
+      loading: "Menugaskan reviewer...",
+      success: (result) => {
+        if ("ok" in result) {
+          fetchMyArticles();
+          fetchReviewTasks();
+          return "Reviewer berhasil ditugaskan!";
+        } else {
+          throw new Error(result.err);
+        }
+      },
+      error: (err) => `Gagal: ${err.message}`,
+    });
+  };
 
   const handleSubmitReview = async (articleId, decision, comments) => {
     if (!actor) return;
-    setMessage("Mengirim review Anda...");
-    try {
-      // Ubah string decision dari form menjadi object variant Motoko
-      const decisionVariant = { [decision]: null };
-
-      const result = await actor.submitReview(
-        articleId,
-        decisionVariant,
-        comments
-      );
-
-      if ("ok" in result) {
-        setMessage("Review berhasil dikirim!");
-        // Refresh daftar artikel untuk memuat data review yang baru
-        fetchArticles();
-        // Tutup modal dan buka lagi untuk refresh detailnya (opsional)
-        setSelectedArticle(result.ok);
-      } else {
-        setMessage(`Error: ${result.err}`);
+    const decisionVariant = { [decision]: null };
+    await toast.promise(
+      actor.submitReview(articleId, decisionVariant, comments),
+      {
+        loading: "Mengirim review...",
+        success: (result) => {
+          if ("ok" in result) {
+            fetchMyArticles();
+            fetchReviewTasks();
+            setSelectedArticle(result.ok);
+            return "Review berhasil dikirim!";
+          } else {
+            throw new Error(result.err);
+          }
+        },
+        error: (err) => `Gagal: ${err.message}`,
       }
-    } catch (error) {
-      console.error("Gagal mengirim review:", error);
-      setMessage("Terjadi error saat mengirim review.");
-    }
-  };
-
-  const handleFinalizeDecision = async (articleId) => {
-    if (!actor) return;
-    setMessage(`Memfinalisasi keputusan untuk artikel ID: ${articleId}...`);
-    try {
-      const result = await actor.finalizeDecision(articleId);
-
-      if ("ok" in result) {
-        setMessage("Keputusan berhasil difinalisasi!");
-        // Refresh daftar artikel untuk menampilkan status final (accepted/rejected)
-        fetchArticles();
-        // Update juga artikel yang sedang dilihat di modal
-        setSelectedArticle(result.ok);
-      } else {
-        setMessage(`Error: ${result.err}`);
-      }
-    } catch (error) {
-      console.error("Gagal memfinalisasi keputusan:", error);
-      setMessage("Terjadi error saat finalisasi.");
-    }
-  };
-
-  const handleAssignReviewer = async (articleId, reviewerPrincipal) => {
-    if (!actor) return;
-    setMessage(`Menugaskan reviewer ke artikel ID: ${articleId}...`);
-    try {
-      const result = await actor.assignReviewer(articleId, reviewerPrincipal);
-      if ("ok" in result) {
-        setMessage("Reviewer berhasil ditugaskan!");
-        // Refresh daftar artikel untuk melihat data (status & reviewer) yang baru
-        fetchArticles();
-      } else {
-        setMessage(`Error: ${result.err}`);
-      }
-    } catch (error) {
-      console.error("Gagal menugaskan reviewer:", error);
-      setMessage("Terjadi error saat menugaskan reviewer.");
-    }
+    );
   };
 
   const handlePublishArticle = async (articleId) => {
     if (!actor) return;
-    setMessage(`Mempublikasikan artikel ID: ${articleId}...`);
-    try {
-      const result = await actor.publishArticle(articleId);
-      if ("ok" in result) {
-        setMessage("Artikel berhasil dipublikasikan!");
-        fetchArticles(); // Refresh daftar utama
-      } else {
-        setMessage(`Error: ${result.err}`);
-      }
-    } catch (error) {
-      console.error("Gagal mempublikasikan:", error);
-      setMessage("Terjadi error saat publikasi.");
-    }
+    await toast.promise(actor.publishArticle(articleId), {
+      loading: "Mempublikasikan artikel...",
+      success: (result) => {
+        if ("ok" in result) {
+          fetchMyArticles(); // Refresh data di latar belakang
+          fetchReviewTasks();
+          return "Artikel berhasil dipublikasikan!";
+        } else {
+          throw new Error(result.err);
+        }
+      },
+      error: (err) => `Error: ${err.message}`,
+    });
   };
 
-  const handleFormSubmit = async (title, file, keywordsString) => {
-    if (!isAuthenticated || !actor) {
-      alert("Harap login terlebih dahulu.");
-      return;
-    }
+  const fetchMyArticles = async () => {
+    if (!actor || !principal) return;
 
     setLoading(true);
-
-    // 1. Proses upload file (masih simulasi)
-    setMessage("1/3 - Mengupload file ke IPFS...");
-    const contentHash = await uploadToIPFS(file);
-
-    // 2. Memproses keywords dari string menjadi array
-    const keywordsArray = keywordsString
-      .split(",")
-      .map((k) => k.trim())
-      .filter((k) => k);
-
     try {
-      // 3. Submit artikel ke canister
-      setMessage("2/3 - Menyimpan artikel...");
-      const submitResult = await actor.submitArticle(
-        title,
-        contentHash,
-        keywordsArray
-      );
-
-      if ("err" in submitResult) {
-        throw new Error(submitResult.err);
-      }
-
-      const submittedId = submitResult.ok;
-      setMessage(`3/3 - Artikel tersimpan (ID: ${submittedId}).`);
-
-      fetchArticles(); // Refresh daftar artikel untuk melihat hasilnya
+      // Panggil fungsi backend yang sudah Anda buat!
+      const articles = await actor.getArticlesByAuthor(principal);
+      setMyArticles(articles);
     } catch (error) {
-      console.error("Gagal dalam proses submit:", error);
-      setMessage(`Terjadi error: ${error.message}`);
+      console.error("Gagal mengambil artikel saya:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleStatusUpdate = async (articleId, newStatus) => {
-    // ... (logika sama, tapi gunakan 'actor' dari context)
-    const success = await actor.updateArticleStatus(articleId, newStatus);
-    // ...
+  const fetchReviewTasks = async () => {
+    if (!actor || !principal) return;
+
+    setLoading(true);
+    try {
+      // Panggil fungsi backend yang sudah Anda buat!
+      const tasks = await actor.getArticlesToReview(principal);
+      setReviewTasks(tasks);
+    } catch (error) {
+      console.error("Gagal mengambil tugas review:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFinalizeDecision = async (articleId) => {
+    if (!actor) return;
+    await toast.promise(actor.finalizeDecision(articleId), {
+      loading: "Memfinalisasi keputusan...",
+      success: (result) => {
+        if ("ok" in result) {
+          fetchMyArticles();
+          fetchReviewTasks();
+          setSelectedArticle(result.ok);
+          return "Keputusan berhasil difinalisasi!";
+        } else {
+          throw new Error(result.err);
+        }
+      },
+      error: (err) => `Gagal: ${err.message}`,
+    });
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 py-10 font-sans">
-      <div className="container mx-auto px-4">
-        <Auth />
-
-        {isAuthenticated && (
-          <>
-            <div className="w-full max-w-4xl mx-auto my-8">
-              <Profile />
-            </div>
-            <div className="mt-8">
-              <ArticleForm
-                backendActor={actor}
-                onFormSubmit={handleFormSubmit}
-                loading={loading}
-              />
-            </div>
-          </>
-        )}
-
-        {message && <p className="text-center ...">{message}</p>}
-
-        {/* --- NAVIGASI TAB BARU --- */}
-        <div className="w-full max-w-4xl mx-auto my-8 border-b border-gray-300 flex">
-          <button
-            onClick={() => setActiveTab("all_articles")}
-            className={`py-2 px-6 font-semibold ${
-              activeTab === "all_articles"
-                ? "border-b-2 border-indigo-600 text-indigo-600"
-                : "text-gray-500"
-            }`}
-          >
-            Semua Artikel
-          </button>
-          <button
-            onClick={() => setActiveTab("published")}
-            className={`py-2 px-6 ... ${
-              activeTab === "published" ? "..." : "..."
-            }`}
-          >
-            Published
-          </button>
-          {isAuthenticated && (
-            <>
-              <button
-                onClick={() => setActiveTab("my_articles")}
-                className={`py-2 px-6 font-semibold ${
-                  activeTab === "my_articles"
-                    ? "border-b-2 border-indigo-600 text-indigo-600"
-                    : "text-gray-500"
-                }`}
-              >
-                Artikel Saya
-              </button>
-              <button
-                onClick={() => setActiveTab("my_reviews")}
-                className={`py-2 px-6 font-semibold ${
-                  activeTab === "my_reviews"
-                    ? "border-b-2 border-indigo-600 text-indigo-600"
-                    : "text-gray-500"
-                }`}
-              >
-                Tugas Review Saya
-              </button>
-            </>
-          )}
-        </div>
-
-        {/* --- TAMPILAN KONDISIONAL BERDASARKAN TAB --- */}
-        <div className="mt-8">
-          {activeTab === "published" && (
-            <PublishedList onViewDetail={setSelectedArticle} />
-          )}
-          {activeTab === "all_articles" && (
-            <ArticleList
-              articles={articles}
-              onStatusUpdate={handleStatusUpdate}
-              onViewDetail={setSelectedArticle}
+    <Router>
+      <div className="flex flex-col min-h-screen bg-gray-50">
+        <Toaster position="top-center" />
+        <Header />
+        <main className="flex-grow">
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route
+              path="/published"
+              element={
+                <PublishedPage setSelectedArticle={setSelectedArticle} />
+              }
             />
-          )}
-
-          {activeTab === "my_articles" && isAuthenticated && (
-            <AuthorDashboard
-              onStatusUpdate={handleStatusUpdate}
-              onViewDetail={setSelectedArticle}
+            <Route
+              path="/dashboard"
+              element={
+                <DashboardPage
+                  setSelectedArticle={setSelectedArticle}
+                  loading={loading}
+                  myArticles={myArticles}
+                  reviewTasks={reviewTasks}
+                  fetchMyArticles={fetchMyArticles}
+                  fetchReviewTasks={fetchReviewTasks}
+                />
+              }
             />
-          )}
 
-          {activeTab === "my_reviews" && isAuthenticated && (
-            <ReviewDashboard
-              onStatusUpdate={handleStatusUpdate}
-              onViewDetail={setSelectedArticle}
+            <Route
+              path="/article/:articleId"
+              element={
+                <ArticleDetailPage
+                  reviewers={reviewers}
+                  onAssignReviewer={handleAssignReviewer}
+                  onReviewSubmit={handleSubmitReview}
+                  onPublish={handlePublishArticle}
+                  onFinalize={handleFinalizeDecision}
+                />
+              }
             />
-          )}
-        </div>
-
-        <ArticleDetailModal
-          article={selectedArticle}
-          onClose={() => setSelectedArticle(null)}
-          onPublish={handlePublishArticle}
-          reviewers={reviewers}
-          onAssignReviewer={handleAssignReviewer}
-          onReviewSubmit={handleSubmitReview}
-          currentUserPrincipal={principal}
-          onFinalize={handleFinalizeDecision}
-        />
+          </Routes>
+        </main>
+        <Footer />
       </div>
-    </div>
+    </Router>
   );
 }
 

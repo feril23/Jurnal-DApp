@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 
 // Komponen ini menerima fungsi 'onFormSubmit' dan status 'loading' dari parent.
-function ArticleForm({ onFormSubmit, loading }) {
+function ArticleForm({ onFormSubmit, isLoading }) {
   const [title, setTitle] = useState("");
   const [file, setFile] = useState(null);
   const [keywords, setKeywords] = useState("");
@@ -76,10 +76,10 @@ function ArticleForm({ onFormSubmit, loading }) {
         </div>
         <button
           type="submit"
-          disabled={loading}
+          disabled={isLoading}
           className="w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-700 transition duration-300 disabled:bg-gray-400"
         >
-          {loading ? "Processing..." : "Submit Artikel"}
+          {isLoading ? "Processing..." : "Submit Artikel"}
         </button>
       </form>
     </div>
