@@ -1,59 +1,97 @@
-# `jurnal-web`
+# Rejoul: A Decentralized Research Journal Platform 🚀
 
-Welcome to your new `jurnal-web` project and to the Internet Computer development community. By default, creating a new project adds this README and some template files to your project directory. You can edit these template files to customize your project and to include your own code to speed up the development cycle.
+**Rejoul** is a full-stack scientific publishing platform built entirely on the **Internet Computer**. This project is designed to revolutionize the academic world by introducing transparency, immutability, and incentives powered by blockchain technology.
 
-To get started, you might want to explore the project directory structure and the default configuration file. Working with this project in your development environment will not affect any production deployment or identity tokens.
+The platform automates the entire publication lifecycle, from an author's initial submission and automated peer-review matching, to on-chain rewards and permanent, decentralized publication.
 
-To learn more before you start working with `jurnal-web`, see the following documentation available online:
+---
 
-- [Quick Start](https://internetcomputer.org/docs/current/developer-docs/setup/deploy-locally)
-- [SDK Developer Tools](https://internetcomputer.org/docs/current/developer-docs/setup/install)
-- [Motoko Programming Language Guide](https://internetcomputer.org/docs/current/motoko/main/motoko)
-- [Motoko Language Quick Reference](https://internetcomputer.org/docs/current/motoko/main/language-manual)
+## ✨ Key Features
 
-If you want to start working on your project right away, you might want to try the following commands:
+Rejoul implements a complete, autonomous workflow with the following features:
 
-```bash
-cd jurnal-web/
-dfx help
-dfx canister --help
-```
+* **Decentralized Authentication**: Full integration with **Internet Identity** for secure and anonymous user management.
+* **Permanent File Storage**: Journal files are uploaded and permanently stored on **IPFS (InterPlanetary File System)** via the Pinata service.
+* **On-Chain User Profiles**: Users can register profiles as authors or reviewers, complete with their name and field of expertise.
+* **Article Submission Workflow**: Authors can submit articles with essential metadata, including a title and keywords for matchmaking.
+* **Automated Reviewer Assignment**: A smart contract scoring algorithm automatically assigns the most relevant reviewers based on a combination of matching **expertise** and current **workload**.
+* **On-Chain Peer Review System**: Assigned reviewers can submit their decisions (`Accept`, `Reject`, `Revise`) along with comments. All reviews are recorded transparently.
+* **Automated Decision & Publication**: The system automatically finalizes an article's status to `Accepted` or `Rejected` based on the collected peer reviews and allows the author to publish accepted articles.
+* **Reputation & Notification System**: Reviewers earn reputation points for each completed review, and all users receive on-chain notifications for important events.
+* **Personalized Dashboards**: Separate dashboard views for Authors (to track their submissions) and Reviewers (to manage their review queue).
+* **Professional Multi-Page Architecture**: The frontend is built with React and features a modern multi-page structure using `react-router-dom` and centralized state management with `React Context`.
 
-## Running the project locally
+---
 
-If you want to test your project locally, you can use the following commands:
+## 📚 Technology Stack
 
-```bash
-# Starts the replica, running in the background
-dfx start --background
+This project is built using a modern Web3 stack on the Internet Computer ecosystem.
 
-# Deploys your canisters to the replica and generates your candid interface
-dfx deploy
-```
+| Category         | Technology            | Description                                                                  |
+| :--------------- | :-------------------- | :--------------------------------------------------------------------------- |
+| **Blockchain** | Internet Computer (ICP) | The primary platform for hosting smart contracts (canisters) and web assets. |
+| **Backend** | Motoko                | A robust and type-safe programming language designed specifically for ICP.     |
+| **Tooling** | `dfx`, `mops`         | The DFX SDK for development and Mops for Motoko package management.            |
+| **Frontend** | React.js, Vite        | A modern UI library with a high-performance build tool.                      |
+| **Styling** | Tailwind CSS          | A utility-first CSS framework for rapid and responsive design.                 |
+| **Routing** | `react-router-dom`    | The standard library for multi-page navigation in React.                     |
+| **Authentication** | Internet Identity     | DFINITY's secure and decentralized login system.                             |
+| **File Storage** | IPFS & Pinata         | A distributed file system for permanent content storage and pinning.         |
 
-Once the job completes, your application will be available at `http://localhost:4943?canisterId={asset_canister_id}`.
+---
 
-If you have made changes to your backend canister, you can generate a new candid interface with
+## ⚙️ Getting Started: Local Configuration
 
-```bash
-npm run generate
-```
+Follow these steps to get the project running on your local development environment.
 
-at any time. This is recommended before starting the frontend development server, and will be run automatically any time you run `dfx deploy`.
+### Prerequisites
+Ensure you have the following installed:
+* [DFX SDK](https://internetcomputer.org/docs/current/developer-docs/setup/install/) (version 0.15.0 or newer)
+* [Node.js](https://nodejs.org/en/) (version 16.x or newer)
 
-If you are making frontend changes, you can start a development server with
+### Installation Steps
 
-```bash
-npm start
-```
+1.  **Clone the Repository**
+    ```bash
+    git clone [YOUR_REPOSITORY_URL]
+    cd [PROJECT_FOLDER_NAME]
+    ```
 
-Which will start a server at `http://localhost:8080`, proxying API requests to the replica at port 4943.
+2.  **Install Dependencies**
+    This project uses `npm workspaces`. Install all dependencies from the root directory.
+    ```bash
+    npm install
+    ```
 
-### Note on frontend environment variables
+3.  **Configure Environment Variables (API Keys)**
+    The IPFS file upload functionality requires an API Key from Pinata.
 
-If you are hosting frontend code somewhere without using DFX, you may need to make one of the following adjustments to ensure your project does not fetch the root key in production:
+    * Create a free account at [pinata.cloud](https://pinata.cloud/).
+    * Create a new API Key.
+    * Create a new file named `.env.local` inside the frontend directory: `src/jurnal_final_frontend/`.
+    * Fill the file with your keys:
+        ```
+        VITE_PINATA_API_KEY=YOUR_PINATA_KEY_HERE
+        VITE_PINATA_SECRET_API_KEY=YOUR_PINATA_SECRET_HERE
+        ```
 
-- set`DFX_NETWORK` to `ic` if you are using Webpack
-- use your own preferred method to replace `process.env.DFX_NETWORK` in the autogenerated declarations
-  - Setting `canisters -> {asset_canister_id} -> declarations -> env_override to a string` in `dfx.json` will replace `process.env.DFX_NETWORK` with the string in the autogenerated declarations
-- Write your own `createActor` constructor
+4.  **Run the Local Replica and Deploy**
+    * Open a new terminal window, navigate to the project root, and start the local network:
+        ```bash
+        dfx start --background --clean
+        ```
+    * In your original terminal, deploy the canisters:
+        ```bash
+        dfx deploy
+        ```
+
+5.  **Access the Application**
+    After deployment, the terminal will output the URL for your frontend canister. Copy this URL and open it in your browser. It will look something like this: `http://127.0.0.1:4943/?canisterId=...`
+
+    **Important:** You must use the canister URL provided by `dfx` (not `localhost:3000`) for the Internet Identity integration to function correctly.
+
+---
+
+## 📜 License
+
+This project is distributed under the MIT License. See the `LICENSE` file for more details.
