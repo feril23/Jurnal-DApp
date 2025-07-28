@@ -53,8 +53,8 @@ Ensure you have the following installed:
 
 1.  **Clone the Repository**
     ```bash
-    git clone [YOUR_REPOSITORY_URL]
-    cd [PROJECT_FOLDER_NAME]
+    git clone https://github.com/feril23/Jurnal-DApp.git
+    cd Jurnal-DApp
     ```
 
 2.  **Install Dependencies**
