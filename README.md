@@ -91,7 +91,3 @@ Ensure you have the following installed:
     **Important:** You must use the canister URL provided by `dfx` (not `localhost:3000`) for the Internet Identity integration to function correctly.
 
 ---
-
-## 📜 License
-
-This project is distributed under the MIT License. See the `LICENSE` file for more details.
